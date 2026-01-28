@@ -1,4 +1,12 @@
+-- Migration 043: Consolidated Member System Fix
+-- Replaces logic from 037-042 to ensure consistent, correct state
+-- Objectives:
+-- 1. Fix org_member_master structure (full_name, email, composite PK)
+-- 2. Fix triggers for auto-voter registration (correct columns, exclude admins)
+-- 3. Fix member management functions
+-- 4. Clean up legacy functions (sp_get_org_members)
 
+BEGIN;
 
 -- ==========================================
 -- 1. CLEANUP OLD/BROKEN OBJECTS
@@ -151,3 +159,71 @@ BEGIN
              WHEN om.role_name = 'ADMIN' THEN 2 
              ELSE 3 END,
         om.created_at ASC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Remove member
+CREATE OR REPLACE FUNCTION sp_remove_org_member(
+    p_organization_id BIGINT,
+    p_user_id BIGINT,
+    p_removed_by_user_id BIGINT
+)
+RETURNS VOID AS $$
+DECLARE
+    v_is_admin BOOLEAN;
+BEGIN
+    SELECT is_org_admin(p_removed_by_user_id, p_organization_id) INTO v_is_admin;
+    
+    IF NOT v_is_admin THEN
+        RAISE EXCEPTION 'Not authorized to remove members' USING ERRCODE = '28000';
+    END IF;
+
+    -- Deactivate member
+    UPDATE org_members
+    SET is_active = FALSE
+    WHERE organization_id = p_organization_id AND user_id = p_user_id;
+
+    -- Suspend voter
+    UPDATE voters
+    SET status = 'BLOCKED', is_approved = FALSE
+    WHERE organization_id = p_organization_id AND user_id = p_user_id;
+
+    -- Log
+    INSERT INTO audit_logs (organization_id, user_id, action_type, entity_name, entity_id, details_json)
+    VALUES (p_organization_id, p_removed_by_user_id, 'MEMBER_REMOVED', 'org_members', p_user_id, jsonb_build_object('removed_user_id', p_user_id));
+END;
+$$ LANGUAGE plpgsql;
+
+-- ==========================================
+-- 5. DATA SYNC (Retroactive Fix)
+-- ==========================================
+
+-- Populate master from existing members
+INSERT INTO org_member_master (organization_id, member_id, member_type, full_name, email)
+SELECT om.organization_id, om.user_id::VARCHAR, 'USER', u.username, u.email
+FROM org_members om
+JOIN user_accounts u ON om.user_id = u.user_id
+WHERE om.is_active = TRUE
+ON CONFLICT (organization_id, member_id) DO NOTHING;
+
+-- Populate voters from existing members (excluding admin/owner)
+INSERT INTO voters (organization_id, user_id, member_id, voter_type, status, is_approved, approved_at)
+SELECT 
+    om.organization_id, om.user_id, om.user_id::VARCHAR, 'USER', 'APPROVED', TRUE, NOW()
+FROM org_members om
+WHERE om.is_active = TRUE 
+  AND om.role_name NOT IN ('OWNER', 'ADMIN')
+ON CONFLICT (organization_id, user_id) DO NOTHING;
+
+-- Remove Owner/Admin from voters table
+DELETE FROM voters v
+WHERE EXISTS (
+    SELECT 1 FROM org_members om 
+    WHERE om.organization_id = v.organization_id 
+      AND om.user_id = v.user_id 
+      AND om.role_name IN ('OWNER', 'ADMIN')
+);
+
+COMMIT;
+
+SELECT 'Migration 043 complete: Consolidated Member System Fix' AS message;

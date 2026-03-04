@@ -159,7 +159,8 @@ router.get("/:electionId", authMiddleware, async (req, res, next) => {
         er.race_id,
         er.race_name,
         er.description,
-        er.max_votes_per_voter
+        er.max_votes_per_voter,
+        er.max_winners
        FROM election_races er
        WHERE er.election_id = $1
        ORDER BY er.race_id`,
@@ -175,6 +176,7 @@ router.get("/:electionId", authMiddleware, async (req, res, next) => {
             c.full_name,
             c.affiliation_name,
             c.bio,
+            c.photo_url,
             c.is_approved,
             cr.display_name,
             cr.ballot_order
@@ -375,6 +377,93 @@ router.post("/:electionId/close", authMiddleware, async (req, res, next) => {
                 error: err.message || "Cannot close election in current state",
             });
         }
+        next(err);
+    }
+});
+
+/**
+ * GET /elections/:electionId/report
+ * Generate detailed election report with winners, margins, and vote percentages
+ * Available for CLOSED elections only
+ */
+router.get("/:electionId/report", authMiddleware, async (req, res, next) => {
+    try {
+        const userId = req.user!.user_id;
+        const electionId = parseIntParam(req.params.electionId as string, "electionId");
+
+        // Check if user is member of the organization
+        const memberCheck = await pool.query(
+            `SELECT 1 FROM org_members om
+       JOIN elections e ON om.organization_id = e.organization_id
+       WHERE e.election_id = $1 AND om.user_id = $2 AND om.is_active = TRUE`,
+            [electionId, userId]
+        );
+
+        if (memberCheck.rows.length === 0) {
+            return res.status(403).json({
+                ok: false,
+                error: "Not authorized to view this election report",
+            });
+        }
+
+        // Get the report
+        const { rows } = await pool.query(
+            `SELECT * FROM sp_generate_election_report($1)`,
+            [electionId]
+        );
+
+        return res.json({
+            ok: true,
+            report: rows,
+        });
+    } catch (err: any) {
+        if (err.code === "22023") {
+            return res.status(400).json({
+                ok: false,
+                error: err.message || "Cannot generate report for this election",
+            });
+        }
+        next(err);
+    }
+});
+
+/**
+ * GET /elections/:electionId/summary
+ * Get high-level election summary statistics
+ */
+router.get("/:electionId/summary", authMiddleware, async (req, res, next) => {
+    try {
+        const userId = req.user!.user_id;
+        const electionId = parseIntParam(req.params.electionId as string, "electionId");
+
+        // Check if user is member of the organization
+        const memberCheck = await pool.query(
+            `SELECT 1 FROM org_members om
+       JOIN elections e ON om.organization_id = e.organization_id
+       WHERE e.election_id = $1 AND om.user_id = $2 AND om.is_active = TRUE`,
+            [electionId, userId]
+        );
+
+        if (memberCheck.rows.length === 0) {
+            return res.status(403).json({
+                ok: false,
+                error: "Not authorized to view this election summary",
+            });
+        }
+
+        // Get the summary
+        const { rows } = await pool.query(
+            `SELECT * FROM sp_get_election_summary($1)`,
+            [electionId]
+        );
+
+        const summary = rows[0] || null;
+
+        return res.json({
+            ok: true,
+            summary,
+        });
+    } catch (err) {
         next(err);
     }
 });

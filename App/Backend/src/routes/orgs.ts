@@ -4,6 +4,8 @@ import { pool } from "../db";
 import { authMiddleware } from "../middleware/auth";
 import { withTx } from "../tx";
 
+import { isSuperAdmin } from "../middleware/superAdmin";
+
 const router = Router();
 
 function parseIntParam(value: string, name: string) {
@@ -31,10 +33,20 @@ router.get("/all", authMiddleware, async (req, res, next) => {
   }
 });
 
-// POST /orgs - create organization
+// POST /orgs - create organization (SUPER ADMIN ONLY - regular users must use /admin/org-requests)
 router.post("/", authMiddleware, async (req, res, next) => {
   try {
-    const userId = req.user!.user_id; // from JWT (number)
+    const userId = req.user!.user_id;
+
+    // Only super admin can create orgs directly
+    const isAdmin = await isSuperAdmin(userId);
+    if (!isAdmin) {
+      return res.status(403).json({
+        ok: false,
+        error: "Direct organization creation is restricted. Please submit a request via the organization request form.",
+      });
+    }
+
     const { organization_name, organization_type, organization_code } = req.body;
 
     if (!organization_name || !organization_type || !organization_code) {
@@ -477,6 +489,29 @@ router.delete("/:orgId/members/:userId", authMiddleware, async (req, res, next) 
   } catch (err: any) {
     if (err.code === '28000') {
       return res.status(403).json({ ok: false, error: err.message });
+    }
+    next(err);
+  }
+});
+
+// DELETE /orgs/:orgId - Delete organization (OWNER only)
+router.delete("/:orgId", authMiddleware, async (req, res, next) => {
+  try {
+    const userId = req.user!.user_id;
+    const orgId = parseIntParam(req.params.orgId as string, "orgId");
+
+    await pool.query(
+      `SELECT sp_delete_organization($1, $2)`,
+      [orgId, userId]
+    );
+
+    return res.json({ ok: true, message: "Organization deleted successfully" });
+  } catch (err: any) {
+    if (err.code === '28000') {
+      return res.status(403).json({ ok: false, error: err.message });
+    }
+    if (err.code === '02000') {
+      return res.status(404).json({ ok: false, error: "Organization not found" });
     }
     next(err);
   }

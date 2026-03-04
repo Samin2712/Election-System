@@ -2,6 +2,7 @@ import { Router } from "express";
 import { pool } from "../db";
 import { authMiddleware } from "../middleware/auth";
 import { withTx } from "../tx";
+import { candidatePhotoUpload } from "../upload";
 
 const router = Router();
 
@@ -19,12 +20,12 @@ function parseIntParam(value: string, name: string): number {
 /**
  * POST /races
  * Create a new race for an election
- * Body: { election_id, race_name, description?, max_votes_per_voter? }
+ * Body: { election_id, race_name, description?, max_votes_per_voter?, max_winners? }
  */
 router.post("/", authMiddleware, async (req, res, next) => {
     try {
         const userId = req.user!.user_id;
-        const { election_id, race_name, description, max_votes_per_voter } = req.body;
+        const { election_id, race_name, description, max_votes_per_voter, max_winners } = req.body;
 
         if (!election_id || !race_name) {
             return res.status(400).json({
@@ -35,6 +36,7 @@ router.post("/", authMiddleware, async (req, res, next) => {
 
         const electionId = Number(election_id);
         const maxVotes = Number(max_votes_per_voter) || 1;
+        const maxWinners = Number(max_winners) || 1;
 
         if (!Number.isInteger(electionId) || electionId <= 0) {
             return res.status(400).json({
@@ -45,8 +47,8 @@ router.post("/", authMiddleware, async (req, res, next) => {
 
         const raceId = await withTx(req, async (client) => {
             const { rows } = await client.query(
-                `SELECT sp_create_race($1, $2, $3, $4, $5) AS race_id`,
-                [electionId, race_name, description || null, maxVotes, userId]
+                `SELECT sp_create_race($1, $2, $3, $4, $5, $6) AS race_id`,
+                [electionId, race_name, description || null, maxVotes, maxWinners, userId]
             );
             return rows[0].race_id;
         });
@@ -161,13 +163,13 @@ router.get("/:raceId", authMiddleware, async (req, res, next) => {
 /**
  * PUT /races/:raceId
  * Update race details
- * Body: { race_name, description?, max_votes_per_voter? }
+ * Body: { race_name, description?, max_votes_per_voter?, max_winners? }
  */
 router.put("/:raceId", authMiddleware, async (req, res, next) => {
     try {
         const userId = req.user!.user_id;
         const raceId = parseIntParam(req.params.raceId as string, "raceId");
-        const { race_name, description, max_votes_per_voter } = req.body;
+        const { race_name, description, max_votes_per_voter, max_winners } = req.body;
 
         if (!race_name) {
             return res.status(400).json({
@@ -177,11 +179,12 @@ router.put("/:raceId", authMiddleware, async (req, res, next) => {
         }
 
         const maxVotes = Number(max_votes_per_voter) || 1;
+        const maxWinners = Number(max_winners) || 1;
 
         await withTx(req, async (client) => {
             await client.query(
-                `SELECT sp_update_race($1, $2, $3, $4, $5)`,
-                [raceId, race_name, description || null, maxVotes, userId]
+                `SELECT sp_update_race($1, $2, $3, $4, $5, $6)`,
+                [raceId, race_name, description || null, maxVotes, maxWinners, userId]
             );
         });
 
@@ -242,10 +245,10 @@ router.delete("/:raceId", authMiddleware, async (req, res, next) => {
 
 /**
  * POST /races/:raceId/candidates
- * Add a candidate to a race
- * Body: { full_name, affiliation_name?, bio?, manifesto?, ballot_order? }
+ * Add a candidate to a race (with optional photo upload)
+ * Body (multipart/form-data): { full_name, affiliation_name?, bio?, manifesto?, ballot_order?, photo? }
  */
-router.post("/:raceId/candidates", authMiddleware, async (req, res, next) => {
+router.post("/:raceId/candidates", authMiddleware, candidatePhotoUpload.single("photo"), async (req, res, next) => {
     try {
         const userId = req.user!.user_id;
         const raceId = parseIntParam(req.params.raceId as string, "raceId");
@@ -258,9 +261,14 @@ router.post("/:raceId/candidates", authMiddleware, async (req, res, next) => {
             });
         }
 
+        // Build photo URL if file was uploaded
+        const photoUrl = req.file
+            ? `/uploads/candidates/${req.file.filename}`
+            : null;
+
         const candidateId = await withTx(req, async (client) => {
             const { rows } = await client.query(
-                `SELECT sp_add_candidate_to_race($1, $2, $3, $4, $5, $6, $7) AS candidate_id`,
+                `SELECT sp_add_candidate_to_race($1, $2, $3, $4, $5, $6, $7, $8) AS candidate_id`,
                 [
                     raceId,
                     full_name,
@@ -269,6 +277,7 @@ router.post("/:raceId/candidates", authMiddleware, async (req, res, next) => {
                     manifesto || null,
                     ballot_order || null,
                     userId,
+                    photoUrl,
                 ]
             );
             return rows[0].candidate_id;
@@ -279,6 +288,7 @@ router.post("/:raceId/candidates", authMiddleware, async (req, res, next) => {
             candidate_id: candidateId,
             full_name,
             race_id: raceId,
+            photo_url: photoUrl,
         });
     } catch (err: any) {
         if (err.code === "28000") {
@@ -305,10 +315,10 @@ router.post("/:raceId/candidates", authMiddleware, async (req, res, next) => {
 
 /**
  * PUT /races/:raceId/candidates/:candidateId
- * Update candidate details
- * Body: { full_name, affiliation_name?, bio?, manifesto? }
+ * Update candidate details (with optional photo upload)
+ * Body (multipart/form-data): { full_name, affiliation_name?, bio?, manifesto?, photo? }
  */
-router.put("/:raceId/candidates/:candidateId", authMiddleware, async (req, res, next) => {
+router.put("/:raceId/candidates/:candidateId", authMiddleware, candidatePhotoUpload.single("photo"), async (req, res, next) => {
     try {
         const userId = req.user!.user_id;
         const candidateId = parseIntParam(req.params.candidateId as string, "candidateId");
@@ -321,9 +331,13 @@ router.put("/:raceId/candidates/:candidateId", authMiddleware, async (req, res, 
             });
         }
 
+        const photoUrl = req.file
+            ? `/uploads/candidates/${req.file.filename}`
+            : null;
+
         await withTx(req, async (client) => {
             await client.query(
-                `SELECT sp_update_candidate($1, $2, $3, $4, $5, $6)`,
+                `SELECT sp_update_candidate($1, $2, $3, $4, $5, $6, $7)`,
                 [
                     candidateId,
                     full_name,
@@ -331,6 +345,7 @@ router.put("/:raceId/candidates/:candidateId", authMiddleware, async (req, res, 
                     bio || null,
                     manifesto || null,
                     userId,
+                    photoUrl,
                 ]
             );
         });

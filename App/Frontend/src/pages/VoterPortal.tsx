@@ -275,39 +275,49 @@ export default function VoterPortal() {
                                             <button
                                                 key={candidate.candidate_id}
                                                 onClick={() => handleVoteSelection(race.race_id, candidate.candidate_id, race.max_votes_per_voter)}
-                                                className={`p-6 text-left rounded-2xl border-2 transition-all duration-300 ${isSelected
-                                                    ? 'border-blue-600 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-xl scale-105'
+                                                className={`text-left rounded-2xl border-2 transition-all duration-300 overflow-hidden ${isSelected
+                                                    ? 'border-blue-600 shadow-xl scale-105 ring-4 ring-blue-200'
                                                     : 'border-slate-200 bg-white hover:border-blue-400 hover:shadow-lg'
                                                     }`}
                                             >
-                                                <div className="flex items-start space-x-4 mb-4">
-                                                    <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white font-bold text-2xl ${isSelected
-                                                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg'
-                                                        : 'bg-gradient-to-r from-slate-400 to-slate-500'
-                                                        }`}>
-                                                        {candidate.full_name.charAt(0)}
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <h4 className="font-bold text-lg text-slate-900 mb-1">
-                                                            {candidate.full_name}
-                                                        </h4>
-                                                        {isSelected && (
-                                                            <span className="inline-flex items-center space-x-1 text-sm text-blue-600 font-semibold">
-                                                                <CheckCircle className="w-4 h-4" />
-                                                                <span>Selected</span>
-                                                            </span>
-                                                        )}
-                                                    </div>
+                                                {/* Full-width photo */}
+                                                <div className="relative">
+                                                    {candidate.photo_url ? (
+                                                        <img
+                                                            src={candidate.photo_url}
+                                                            alt={candidate.full_name}
+                                                            className="w-full h-52 object-contain bg-slate-100"
+                                                        />
+                                                    ) : (
+                                                        <div className={`w-full h-52 flex items-center justify-center text-white font-bold text-6xl ${isSelected
+                                                            ? 'bg-gradient-to-br from-blue-600 to-indigo-700'
+                                                            : 'bg-gradient-to-br from-slate-400 to-slate-600'
+                                                            }`}>
+                                                            {candidate.full_name.charAt(0)}
+                                                        </div>
+                                                    )}
+                                                    {isSelected && (
+                                                        <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs px-2.5 py-1 rounded-full flex items-center space-x-1 shadow-md">
+                                                            <CheckCircle className="w-3.5 h-3.5" />
+                                                            <span>Selected</span>
+                                                        </span>
+                                                    )}
                                                 </div>
-                                                {candidate.bio && (
-                                                    <p className="text-sm text-slate-600 mb-3">{candidate.bio}</p>
-                                                )}
-                                                {candidate.manifesto && (
-                                                    <div className="bg-slate-100 p-3 rounded-lg">
-                                                        <p className="text-xs font-semibold text-slate-700 mb-1">Manifesto:</p>
-                                                        <p className="text-xs text-slate-600">{candidate.manifesto}</p>
-                                                    </div>
-                                                )}
+                                                {/* Info below photo */}
+                                                <div className="p-4">
+                                                    <h4 className="font-bold text-lg text-slate-900 mb-1">
+                                                        {candidate.full_name}
+                                                    </h4>
+                                                    {candidate.bio && (
+                                                        <p className="text-sm text-slate-600 mb-2">{candidate.bio}</p>
+                                                    )}
+                                                    {candidate.manifesto && (
+                                                        <div className="bg-slate-50 p-2.5 rounded-lg">
+                                                            <p className="text-xs font-semibold text-slate-700 mb-1">Manifesto:</p>
+                                                            <p className="text-xs text-slate-600">{candidate.manifesto}</p>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </button>
                                         );
                                     })}

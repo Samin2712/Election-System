@@ -12,14 +12,18 @@ import {
     CheckCircle,
     X,
     UserPlus,
+    Upload,
+    Trash2,
+    AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
 import { organizationsApi, electionsApi, registrationApi } from '@/lib/api';
 import type { Organization, Election, OrgMember } from '@/types';
+import CSVUploadModal from '@/components/CSVUploadModal';
 
 export default function OrganizerDashboard() {
-    const { user, currentOrganization } = useAuthStore();
+    const { user, currentOrganization, currentOrganizationRole, setCurrentOrganization } = useAuthStore();
     const [loading, setLoading] = useState(true);
     const [organizations, setOrganizations] = useState<Organization[]>([]);
     const [elections, setElections] = useState<Election[]>([]);
@@ -30,6 +34,7 @@ export default function OrganizerDashboard() {
         activeElections: 0,
     });
     const [showInviteModal, setShowInviteModal] = useState(false);
+    const [showCSVModal, setShowCSVModal] = useState(false);
     const [inviteEmail, setInviteEmail] = useState('');
     const [inviteResult, setInviteResult] = useState<{ token: string, email: string } | null>(null);
     const [inviting, setInviting] = useState(false);
@@ -37,6 +42,11 @@ export default function OrganizerDashboard() {
     // Join requests state
     const [joinRequests, setJoinRequests] = useState<any[]>([]);
     const [members, setMembers] = useState<OrgMember[]>([]);
+
+    // Delete organization state
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [deleteConfirmText, setDeleteConfirmText] = useState('');
+    const [deleting, setDeleting] = useState(false);
 
     useEffect(() => {
         console.log('📊 Dashboard: currentOrganization changed:', currentOrganization?.organization_name);
@@ -164,6 +174,30 @@ export default function OrganizerDashboard() {
             loadMembers();
         } catch (error: any) {
             toast.error(error.response?.data?.error || 'Failed to remove member');
+        }
+    };
+
+    // Delete organization handler (OWNER only)
+    const handleDeleteOrganization = async () => {
+        if (!currentOrganization) return;
+        if (deleteConfirmText !== currentOrganization.organization_name) {
+            toast.error('Please type the organization name correctly to confirm');
+            return;
+        }
+
+        setDeleting(true);
+        try {
+            await organizationsApi.deleteOrganization(currentOrganization.organization_id);
+            toast.success('Organization deleted successfully');
+            setShowDeleteModal(false);
+            setDeleteConfirmText('');
+            // Clear current organization and redirect
+            setCurrentOrganization(null);
+            window.location.href = '/dashboard';
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || 'Failed to delete organization');
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -320,6 +354,20 @@ export default function OrganizerDashboard() {
                             </div>
                             <span className="font-bold text-slate-700 group-hover:text-emerald-600">Invite Voters</span>
                             <p className="text-sm text-slate-500">Generate invitation tokens</p>
+                        </div>
+                    </button>
+
+                    <button
+                        onClick={() => setShowCSVModal(true)}
+                        disabled={!currentOrganization}
+                        className={`group relative overflow-hidden p-6 border-2 border-dashed border-slate-300 rounded-2xl transition-all duration-300 ${!currentOrganization ? 'opacity-50 cursor-not-allowed bg-slate-50' : 'hover:border-orange-500 hover:bg-gradient-to-br hover:from-orange-50 hover:to-amber-50'}`}
+                    >
+                        <div className="flex flex-col items-center text-center space-y-3">
+                            <div className="p-4 bg-orange-100 rounded-2xl group-hover:scale-110 transition-transform">
+                                <Upload className="w-8 h-8 text-orange-600" />
+                            </div>
+                            <span className="font-bold text-slate-700 group-hover:text-orange-600">Bulk Invite (CSV)</span>
+                            <p className="text-sm text-slate-500">Upload CSV with emails</p>
                         </div>
                     </button>
                 </div>
@@ -514,6 +562,26 @@ export default function OrganizerDashboard() {
                 </div>
             )}
 
+            {/* Danger Zone - Delete Organization (OWNER only) */}
+            {currentOrganization && currentOrganizationRole === 'OWNER' && (
+                <div className="card border-2 border-red-200 bg-red-50/50">
+                    <div className="flex items-center mb-4">
+                        <AlertTriangle className="w-6 h-6 text-red-600 mr-3" />
+                        <h2 className="text-xl font-bold text-red-700">Danger Zone</h2>
+                    </div>
+                    <p className="text-sm text-red-600 mb-4">
+                        Deleting this organization will permanently remove all elections, votes, members, and related data. This action cannot be undone.
+                    </p>
+                    <button
+                        onClick={() => setShowDeleteModal(true)}
+                        className="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors flex items-center"
+                    >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete Organization
+                    </button>
+                </div>
+            )}
+
             {/* Empty State */}
             {!currentOrganization && (
                 <div className="card empty-state">
@@ -609,6 +677,84 @@ export default function OrganizerDashboard() {
             )}
 
             {/* Modal removed - Direct approval enabled */}
+
+            {/* Delete Organization Confirmation Modal */}
+            {showDeleteModal && currentOrganization && (
+                <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
+                    <div className="modal-content p-8 max-w-md" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center">
+                                <AlertTriangle className="w-8 h-8 text-red-600 mr-3" />
+                                <h2 className="text-2xl font-bold text-red-700">Delete Organization</h2>
+                            </div>
+                            <button onClick={() => setShowDeleteModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4 mb-6">
+                            <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                                <p className="text-sm text-red-700 font-semibold mb-2">This action will permanently delete:</p>
+                                <ul className="text-sm text-red-600 list-disc list-inside space-y-1">
+                                    <li>All elections and their results</li>
+                                    <li>All votes and voter registrations</li>
+                                    <li>All member associations</li>
+                                    <li>All invites and join requests</li>
+                                </ul>
+                            </div>
+
+                            <p className="text-sm text-slate-600">
+                                To confirm, please type <strong className="text-red-700">{currentOrganization.organization_name}</strong> below:
+                            </p>
+
+                            <input
+                                type="text"
+                                className="input border-red-300 focus:border-red-500 focus:ring-red-500"
+                                value={deleteConfirmText}
+                                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                                placeholder="Type organization name to confirm"
+                            />
+                        </div>
+
+                        <div className="flex space-x-3">
+                            <button
+                                onClick={() => setShowDeleteModal(false)}
+                                className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleDeleteOrganization}
+                                disabled={deleting || deleteConfirmText !== currentOrganization.organization_name}
+                                className="flex-1 px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                            >
+                                {deleting ? (
+                                    <>Deleting...</>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-4 h-4 mr-2" />
+                                        Delete Forever
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* CSV Bulk Upload Modal */}
+            {currentOrganization && (
+                <CSVUploadModal
+                    isOpen={showCSVModal}
+                    onClose={() => setShowCSVModal(false)}
+                    organizationId={currentOrganization.organization_id}
+                    organizationName={currentOrganization.organization_name}
+                    onSuccess={() => {
+                        loadJoinRequests();
+                        loadMembers();
+                    }}
+                />
+            )}
         </div>
     );
 }

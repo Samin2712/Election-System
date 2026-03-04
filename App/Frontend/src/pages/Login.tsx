@@ -126,16 +126,6 @@ export default function Login() {
                     </div>
                 </div>
 
-                {/* Demo Credentials */}
-                <div className="mt-6 alert-info">
-                    <p className="font-semibold mb-2 flex items-center space-x-2">
-                        <Sparkles className="w-4 h-4" />
-                        <span>Demo Credentials</span>
-                    </p>
-                    <p className="text-sm">Email: <code className="bg-blue-100 px-2 py-0.5 rounded">admin@test.com</code></p>
-                    <p className="text-sm">Password: <code className="bg-blue-100 px-2 py-0.5 rounded">password123</code></p>
-                </div>
-
                 {/* Footer */}
                 <p className="text-center text-sm text-slate-500 mt-8">
                     Secure, transparent, and democratic voting

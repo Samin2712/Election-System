@@ -11,7 +11,9 @@ import {
     Clock,
     Calendar,
     Play,
-    StopCircle
+    StopCircle,
+    Upload,
+    ImageIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { electionsApi, racesApi, candidatesApi } from '@/lib/api';
@@ -37,13 +39,16 @@ export default function ElectionDetails() {
         race_name: '',
         description: '',
         max_votes_per_voter: 1,
+        max_winners: 1,
     });
 
     const [candidateFormData, setCandidateFormData] = useState<CandidateFormData>({
         full_name: '',
         bio: '',
         manifesto: '',
+        photo: null,
     });
+    const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
     const [scheduleData, setScheduleData] = useState({
         start_at: '',
@@ -85,7 +90,7 @@ export default function ElectionDetails() {
             await racesApi.create({ ...raceFormData, election_id: Number(id) });
             toast.success('Race created successfully!');
             setShowRaceModal(false);
-            setRaceFormData({ election_id: 0, race_name: '', description: '', max_votes_per_voter: 1 });
+            setRaceFormData({ election_id: 0, race_name: '', description: '', max_votes_per_voter: 1, max_winners: 1 });
             loadRaces();
         } catch (error: any) {
             toast.error(error.response?.data?.error || 'Failed to create race');
@@ -112,7 +117,8 @@ export default function ElectionDetails() {
         try {
             await candidatesApi.add(selectedRace.race_id, candidateFormData);
             toast.success('Candidate added successfully!');
-            setCandidateFormData({ full_name: '', bio: '', manifesto: '' });
+            setCandidateFormData({ full_name: '', bio: '', manifesto: '', photo: null });
+            setPhotoPreview(null);
 
             // Reload races to show the new candidate
             await loadRaces();
@@ -318,6 +324,12 @@ export default function ElectionDetails() {
                             Close Election
                         </button>
                     )}
+                    {election.status === 'CLOSED' && (
+                        <Link to={`/report/${election.election_id}`} className="btn-primary flex items-center">
+                            <Trophy className="w-4 h-4 mr-2" />
+                            View Election Report
+                        </Link>
+                    )}
                     {/* Delete button for DRAFT, SCHEDULED, or CLOSED elections */}
                     {(election.status === 'DRAFT' || election.status === 'SCHEDULED' || election.status === 'CLOSED') && (
                         <button
@@ -340,9 +352,14 @@ export default function ElectionDetails() {
                                 <div>
                                     <h3 className="text-2xl font-bold text-slate-900 mb-2">{race.race_name}</h3>
                                     <p className="text-slate-600 mb-2">{race.description || 'No description'}</p>
-                                    <p className="text-sm text-slate-500">
-                                        Max Votes Per Voter: <span className="font-semibold">{race.max_votes_per_voter}</span>
-                                    </p>
+                                    <div className="flex items-center space-x-4 text-sm text-slate-500">
+                                        <p>
+                                            Max Votes Per Voter: <span className="font-semibold">{race.max_votes_per_voter}</span>
+                                        </p>
+                                        <p>
+                                            Winners: <span className="font-semibold">{race.max_winners}</span>
+                                        </p>
+                                    </div>
                                 </div>
                                 {canEdit && (
                                     <div className="flex items-center space-x-2">
@@ -369,41 +386,50 @@ export default function ElectionDetails() {
                                     {race.candidates.map((candidate) => (
                                         <div
                                             key={candidate.candidate_id}
-                                            className="p-4 bg-gradient-to-br from-white to-slate-50 border-2 border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-lg transition-all group"
+                                            className="bg-white border-2 border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-lg transition-all group overflow-hidden"
                                         >
-                                            <div className="flex items-start justify-between mb-3">
-                                                <div className="flex items-center space-x-3">
-                                                    <div className="w-12 h-12 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold text-lg">
+                                            {/* Photo area - full width */}
+                                            <div className="relative">
+                                                {candidate.photo_url ? (
+                                                    <img
+                                                        src={candidate.photo_url}
+                                                        alt={candidate.full_name}
+                                                        className="w-full h-48 object-contain bg-slate-100"
+                                                    />
+                                                ) : (
+                                                    <div className="w-full h-48 bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-bold text-6xl">
                                                         {candidate.full_name.charAt(0)}
                                                     </div>
-                                                    <div>
-                                                        <h4 className="font-bold text-slate-900">{candidate.full_name}</h4>
-                                                        {candidate.is_approved && (
-                                                            <span className="text-xs text-emerald-600 flex items-center space-x-1">
-                                                                <CheckCircle className="w-3 h-3" />
-                                                                <span>Approved</span>
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </div>
+                                                )}
                                                 {canEdit && (
                                                     <button
                                                         onClick={() => handleRemoveCandidate(race.race_id, candidate.candidate_id)}
-                                                        className="p-1 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                        className="absolute top-2 right-2 p-1.5 bg-white/90 text-red-600 hover:bg-red-50 rounded-lg transition-colors shadow-sm"
                                                         title="Remove Candidate"
                                                     >
-                                                        <Trash2 className="w-5 h-5" />
+                                                        <Trash2 className="w-4 h-4" />
                                                     </button>
                                                 )}
+                                                {candidate.is_approved && (
+                                                    <span className="absolute top-2 left-2 text-xs bg-emerald-500 text-white px-2 py-1 rounded-full flex items-center space-x-1 shadow-sm">
+                                                        <CheckCircle className="w-3 h-3" />
+                                                        <span>Approved</span>
+                                                    </span>
+                                                )}
                                             </div>
-                                            {candidate.bio && (
-                                                <p className="text-sm text-slate-600 mb-2">{candidate.bio}</p>
-                                            )}
-                                            {candidate.manifesto && (
-                                                <p className="text-xs text-slate-500 bg-slate-100 p-2 rounded-lg">
-                                                    {candidate.manifesto}
-                                                </p>
-                                            )}
+                                            {/* Info area */}
+                                            <div className="p-4">
+                                                <h4 className="font-bold text-slate-900 text-lg mb-1">{candidate.full_name}</h4>
+                                                {candidate.bio && (
+                                                    <p className="text-sm text-slate-600 mb-2">{candidate.bio}</p>
+                                                )}
+                                                {candidate.manifesto && (
+                                                    <div className="text-xs text-slate-500 bg-slate-50 p-2.5 rounded-lg">
+                                                        <span className="font-semibold text-slate-700">Manifesto: </span>
+                                                        {candidate.manifesto}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -479,6 +505,19 @@ export default function ElectionDetails() {
                                 <p className="text-xs text-slate-500 mt-1">How many candidates a voter can select for this race</p>
                             </div>
 
+                            <div className="form-group">
+                                <label className="label">Maximum Winners *</label>
+                                <input
+                                    type="number"
+                                    required
+                                    min="1"
+                                    value={raceFormData.max_winners}
+                                    onChange={(e) => setRaceFormData({ ...raceFormData, max_winners: Number(e.target.value) })}
+                                    className="input"
+                                />
+                                <p className="text-xs text-slate-500 mt-1">How many candidates will win this race (e.g., 5 for "Top 5 Executive Members")</p>
+                            </div>
+
                             <div className="flex space-x-3 pt-4">
                                 <button type="submit" className="btn-primary flex-1">Add Race</button>
                                 <button type="button" onClick={() => setShowRaceModal(false)} className="btn-secondary">
@@ -534,6 +573,57 @@ export default function ElectionDetails() {
                                     className="input min-h-[100px]"
                                     placeholder="Campaign promises and goals..."
                                 />
+                            </div>
+
+                            {/* Photo Upload */}
+                            <div className="form-group">
+                                <label className="label">Candidate Photo</label>
+                                <div className="flex items-center space-x-4">
+                                    {photoPreview ? (
+                                        <div className="relative">
+                                            <img
+                                                src={photoPreview}
+                                                alt="Preview"
+                                                className="w-20 h-20 rounded-full object-cover border-2 border-blue-300"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setPhotoPreview(null);
+                                                    setCandidateFormData({ ...candidateFormData, photo: null });
+                                                }}
+                                                className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs"
+                                            >
+                                                ×
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="w-20 h-20 rounded-full bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center">
+                                            <ImageIcon className="w-8 h-8 text-slate-400" />
+                                        </div>
+                                    )}
+                                    <label className="cursor-pointer px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-colors flex items-center space-x-2">
+                                        <Upload className="w-4 h-4" />
+                                        <span>{photoPreview ? 'Change Photo' : 'Upload Photo'}</span>
+                                        <input
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/gif,image/webp"
+                                            className="hidden"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) {
+                                                    if (file.size > 5 * 1024 * 1024) {
+                                                        toast.error('Photo must be less than 5MB');
+                                                        return;
+                                                    }
+                                                    setCandidateFormData({ ...candidateFormData, photo: file });
+                                                    setPhotoPreview(URL.createObjectURL(file));
+                                                }
+                                            }}
+                                        />
+                                    </label>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1">JPG, PNG, GIF or WebP. Max 5MB.</p>
                             </div>
 
 

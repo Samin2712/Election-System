@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Building2, Plus, Users, X, Crown, Shield, User as UserIcon, Search, Send, CheckCircle } from 'lucide-react';
+import { Building2, Plus, Users, X, Crown, Shield, User as UserIcon, Search, Send, CheckCircle, Upload, Clock, XCircle, FileText, ImageIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { organizationsApi, registrationApi } from '@/lib/api';
+import { organizationsApi, registrationApi, adminApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
-import type { Organization, OrgMember } from '@/types';
+import type { Organization, OrgMember, OrgRequest, OrgRequestFormData } from '@/types';
+import InvitationManager from '@/components/InvitationManager';
 
 export default function Organizations() {
     const { setCurrentOrganization, userOrganizations } = useAuthStore();
@@ -11,21 +12,45 @@ export default function Organizations() {
     const [loading, setLoading] = useState(true);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showRequestModal, setShowRequestModal] = useState(false);
+    const [showInviteManager, setShowInviteManager] = useState(false);
     const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
     const [members, setMembers] = useState<OrgMember[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [requestMessage, setRequestMessage] = useState('');
+    const [myRequests, setMyRequests] = useState<OrgRequest[]>([]);
+    const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [proofPreview, setProofPreview] = useState<string | null>(null);
 
-    // Form state
-    const [formData, setFormData] = useState({
+    // Form state for org request
+    const [formData, setFormData] = useState<OrgRequestFormData>({
         organization_name: '',
         organization_type: 'UNIVERSITY',
         organization_code: '',
+        purpose: '',
+        expected_members: undefined,
+        proof_document: null,
     });
 
     useEffect(() => {
         loadOrganizations();
+        loadMyRequests();
+        checkAdmin();
     }, []);
+
+    const checkAdmin = async () => {
+        const isAdmin = await adminApi.checkSuperAdmin();
+        setIsSuperAdmin(isAdmin);
+    };
+
+    const loadMyRequests = async () => {
+        try {
+            const data = await adminApi.getMyRequests();
+            setMyRequests(data);
+        } catch (error: any) {
+            console.error('Failed to load requests:', error);
+        }
+    };
 
     const loadOrganizations = async () => {
         setLoading(true);
@@ -53,14 +78,70 @@ export default function Organizations() {
 
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
+        setSubmitting(true);
         try {
-            await organizationsApi.create(formData);
-            toast.success('Organization created successfully!');
+            if (isSuperAdmin) {
+                // Super admin can create directly
+                await adminApi.createOrganization({
+                    organization_name: formData.organization_name,
+                    organization_type: formData.organization_type,
+                    organization_code: formData.organization_code,
+                });
+                toast.success('Organization created successfully!');
+            } else {
+                // Regular user submits a request
+                await adminApi.submitOrgRequest(formData);
+                toast.success('Organization request submitted! Waiting for admin approval.');
+                loadMyRequests();
+            }
             setShowCreateModal(false);
-            setFormData({ organization_name: '', organization_type: 'UNIVERSITY', organization_code: '' });
+            setFormData({ organization_name: '', organization_type: 'UNIVERSITY', organization_code: '', purpose: '', expected_members: undefined, proof_document: null });
+            setProofPreview(null);
             loadOrganizations();
         } catch (error: any) {
-            toast.error(error.response?.data?.error || 'Failed to create organization');
+            toast.error(error.response?.data?.error || 'Failed to submit request');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const handleProofChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0] || null;
+        setFormData({ ...formData, proof_document: file });
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => setProofPreview(reader.result as string);
+            reader.readAsDataURL(file);
+        } else {
+            setProofPreview(null);
+        }
+    };
+
+    const getStatusBadge = (status: string) => {
+        switch (status) {
+            case 'PENDING':
+                return (
+                    <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>Pending</span>
+                    </span>
+                );
+            case 'APPROVED':
+                return (
+                    <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        <span>Approved</span>
+                    </span>
+                );
+            case 'REJECTED':
+                return (
+                    <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Rejected</span>
+                    </span>
+                );
+            default:
+                return null;
         }
     };
 
@@ -72,6 +153,16 @@ export default function Organizations() {
 
     const isAlreadyMember = (orgId: number) => {
         return userOrganizations.some(org => org.organization_id === orgId);
+    };
+
+    const getUserRoleInOrg = (orgId: number): 'OWNER' | 'ADMIN' | 'MEMBER' | null => {
+        const org = userOrganizations.find(o => o.organization_id === orgId);
+        return org?.user_role || null;
+    };
+
+    const isOwnerOrAdmin = (orgId: number): boolean => {
+        const role = getUserRoleInOrg(orgId);
+        return role === 'OWNER' || role === 'ADMIN';
     };
 
     const handleRequestJoin = (org: Organization) => {
@@ -141,15 +232,17 @@ export default function Organizations() {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-4xl font-black gradient-text mb-2">Organizations</h1>
-                    <p className="text-slate-600">Manage your organizations and members</p>
+                    <p className="text-slate-600">{isSuperAdmin ? 'Browse all organizations on the platform' : 'Manage your organizations and members'}</p>
                 </div>
-                <button
-                    onClick={() => setShowCreateModal(true)}
-                    className="btn-primary flex items-center"
-                >
-                    <Plus className="w-5 h-5 mr-2" />
-                    Create Organization
-                </button>
+                {!isSuperAdmin && (
+                    <button
+                        onClick={() => setShowCreateModal(true)}
+                        className="btn-primary flex items-center"
+                    >
+                        <Plus className="w-5 h-5 mr-2" />
+                        Request Organization
+                    </button>
+                )}
             </div>
 
             {/* Search Bar */}
@@ -165,6 +258,49 @@ export default function Organizations() {
                     />
                 </div>
             </div>
+
+            {/* My Organization Requests (hidden for super admin) */}
+            {!isSuperAdmin && myRequests.length > 0 && (
+                <div className="space-y-4">
+                    <h2 className="text-xl font-bold text-slate-900 flex items-center space-x-2">
+                        <FileText className="w-5 h-5 text-blue-600" />
+                        <span>My Organization Requests</span>
+                    </h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {myRequests.map((req) => (
+                            <div key={req.request_id} className="card border-l-4 border-l-blue-500">
+                                <div className="flex items-start justify-between mb-3">
+                                    <div>
+                                        <h3 className="font-bold text-slate-900">{req.organization_name}</h3>
+                                        <p className="text-sm text-slate-500">{req.organization_type} &middot; {req.organization_code}</p>
+                                    </div>
+                                    {getStatusBadge(req.status)}
+                                </div>
+                                {req.purpose && (
+                                    <p className="text-sm text-slate-600 mb-2 line-clamp-2">{req.purpose}</p>
+                                )}
+                                {req.proof_document_url && (
+                                    <div className="mb-2">
+                                        <img
+                                            src={`/uploads/${req.proof_document_url}`}
+                                            alt="Proof document"
+                                            className="w-full h-24 object-cover rounded-lg border border-slate-200"
+                                        />
+                                    </div>
+                                )}
+                                {req.admin_notes && (
+                                    <div className={`text-sm p-2 rounded-lg mt-2 ${req.status === 'REJECTED' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+                                        <span className="font-medium">Admin Note:</span> {req.admin_notes}
+                                    </div>
+                                )}
+                                <p className="text-xs text-slate-400 mt-2">
+                                    Submitted {new Date(req.created_at).toLocaleDateString()}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Organizations Grid */}
             {filteredOrganizations.length > 0 ? (
@@ -195,8 +331,8 @@ export default function Organizations() {
                                 </div>
                             </div>
 
-                            {/* Request to Join Button for non-members */}
-                            {!isAlreadyMember(org.organization_id) && (
+                            {/* Request to Join Button for non-members (hidden for super admin) */}
+                            {!isSuperAdmin && !isAlreadyMember(org.organization_id) && (
                                 <div className="mt-4">
                                     <button
                                         onClick={(e) => {
@@ -211,8 +347,8 @@ export default function Organizations() {
                                 </div>
                             )}
 
-                            {/* Member Badge for existing members */}
-                            {isAlreadyMember(org.organization_id) && (
+                            {/* Member Badge for existing members (hidden for super admin) */}
+                            {!isSuperAdmin && isAlreadyMember(org.organization_id) && (
                                 <div className="mt-4">
                                     <div className="flex items-center justify-center space-x-2 bg-green-100 text-green-700 px-4 py-2 rounded-lg">
                                         <CheckCircle className="w-4 h-4" />
@@ -228,6 +364,18 @@ export default function Organizations() {
                                             <Users className="w-4 h-4 mr-2" />
                                             Members ({members.length})
                                         </h4>
+                                        {isOwnerOrAdmin(org.organization_id) && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowInviteManager(true);
+                                                }}
+                                                className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center space-x-1"
+                                            >
+                                                <Upload className="w-4 h-4" />
+                                                <span>Bulk Invite</span>
+                                            </button>
+                                        )}
                                     </div>
                                     <div className="space-y-2 max-h-48 overflow-y-auto">
                                         {members.map((member) => (
@@ -267,23 +415,27 @@ export default function Organizations() {
                     <p className="text-slate-600 mb-8">
                         {searchTerm
                             ? 'Try adjusting your search terms'
-                            : 'Create your first organization to get started'}
+                            : isSuperAdmin
+                                ? 'No organizations have been created yet'
+                                : 'Request your first organization to get started'}
                     </p>
-                    {!searchTerm && (
+                    {!searchTerm && !isSuperAdmin && (
                         <button onClick={() => setShowCreateModal(true)} className="btn-primary inline-flex items-center">
                             <Plus className="w-5 h-5 mr-2" />
-                            Create Organization
+                            Request Organization
                         </button>
                     )}
                 </div>
             )}
 
-            {/* Create Modal */}
+            {/* Create / Request Organization Modal */}
             {showCreateModal && (
                 <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
-                    <div className="modal-content p-8" onClick={(e) => e.stopPropagation()}>
+                    <div className="modal-content p-8 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between mb-6">
-                            <h2 className="text-2xl font-bold text-slate-900">Create Organization</h2>
+                            <h2 className="text-2xl font-bold text-slate-900">
+                                {isSuperAdmin ? 'Create Organization' : 'Request Organization'}
+                            </h2>
                             <button
                                 onClick={() => setShowCreateModal(false)}
                                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
@@ -292,7 +444,16 @@ export default function Organizations() {
                             </button>
                         </div>
 
-                        <form onSubmit={handleCreate} className="space-y-6">
+                        {!isSuperAdmin && (
+                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+                                <p className="text-sm text-blue-800">
+                                    <span className="font-semibold">Note:</span> Organization requests are reviewed by a super admin.
+                                    Please upload a proof document (e.g., transcript, visiting card, ID card) to speed up approval.
+                                </p>
+                            </div>
+                        )}
+
+                        <form onSubmit={handleCreate} className="space-y-5">
                             <div className="form-group">
                                 <label className="label">Organization Name *</label>
                                 <input
@@ -314,6 +475,9 @@ export default function Organizations() {
                                     className="input"
                                 >
                                     <option value="UNIVERSITY">University</option>
+                                    <option value="SCHOOL">School</option>
+                                    <option value="COLLEGE">College</option>
+                                    <option value="CLUB">Club</option>
                                     <option value="COMPANY">Company</option>
                                     <option value="NGO">NGO</option>
                                     <option value="GOVERNMENT">Government</option>
@@ -335,9 +499,83 @@ export default function Organizations() {
                                 <p className="text-xs text-slate-500 mt-1">Unique identifier for your organization</p>
                             </div>
 
+                            {/* Additional fields for non-admin users */}
+                            {!isSuperAdmin && (
+                                <>
+                                    <div className="form-group">
+                                        <label className="label">Purpose / Reason *</label>
+                                        <textarea
+                                            required
+                                            value={formData.purpose || ''}
+                                            onChange={(e) => setFormData({ ...formData, purpose: e.target.value })}
+                                            className="input min-h-[80px]"
+                                            rows={3}
+                                            placeholder="Why do you need this organization? e.g., Student body elections for Fall 2024 semester"
+                                        />
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label className="label">Expected Members</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            value={formData.expected_members || ''}
+                                            onChange={(e) => setFormData({ ...formData, expected_members: e.target.value ? Number(e.target.value) : undefined })}
+                                            className="input"
+                                            placeholder="e.g., 500"
+                                        />
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label className="label">Proof Document (Image) *</label>
+                                        <p className="text-xs text-slate-500 mb-2">
+                                            Upload an image of a transcript, visiting card, institution ID, or other proof of affiliation
+                                        </p>
+                                        <div className="relative">
+                                            <input
+                                                type="file"
+                                                required
+                                                accept="image/*"
+                                                onChange={handleProofChange}
+                                                className="hidden"
+                                                id="proof-upload"
+                                            />
+                                            <label
+                                                htmlFor="proof-upload"
+                                                className="flex items-center justify-center w-full p-6 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors"
+                                            >
+                                                {proofPreview ? (
+                                                    <img
+                                                        src={proofPreview}
+                                                        alt="Proof preview"
+                                                        className="max-h-48 rounded-lg object-contain"
+                                                    />
+                                                ) : (
+                                                    <div className="text-center">
+                                                        <ImageIcon className="w-10 h-10 text-slate-400 mx-auto mb-2" />
+                                                        <p className="text-sm text-slate-600 font-medium">Click to upload proof document</p>
+                                                        <p className="text-xs text-slate-400 mt-1">JPG, PNG, GIF up to 10MB</p>
+                                                    </div>
+                                                )}
+                                            </label>
+                                        </div>
+                                        {formData.proof_document && (
+                                            <p className="text-xs text-green-600 mt-1 flex items-center space-x-1">
+                                                <CheckCircle className="w-3 h-3" />
+                                                <span>{formData.proof_document.name}</span>
+                                            </p>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+
                             <div className="flex space-x-3 pt-4">
-                                <button type="submit" className="btn-primary flex-1">
-                                    Create Organization
+                                <button type="submit" className="btn-primary flex-1" disabled={submitting}>
+                                    {submitting
+                                        ? 'Submitting...'
+                                        : isSuperAdmin
+                                            ? 'Create Organization'
+                                            : 'Submit Request'}
                                 </button>
                                 <button
                                     type="button"
@@ -399,6 +637,30 @@ export default function Organizations() {
                                 </button>
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Invitation Manager Modal */}
+            {showInviteManager && selectedOrg && (
+                <div className="modal-overlay" onClick={() => setShowInviteManager(false)}>
+                    <div className="modal-content max-w-4xl max-h-[90vh] overflow-y-auto p-8" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-2xl font-bold text-slate-900">
+                                Manage Invitations - {selectedOrg.organization_name}
+                            </h2>
+                            <button
+                                onClick={() => setShowInviteManager(false)}
+                                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                            >
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <InvitationManager 
+                            organizationId={selectedOrg.organization_id}
+                            organizationName={selectedOrg.organization_name}
+                            isOwnerOrAdmin={isOwnerOrAdmin(selectedOrg.organization_id)}
+                        />
                     </div>
                 </div>
             )}

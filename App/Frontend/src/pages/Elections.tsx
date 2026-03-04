@@ -19,6 +19,7 @@ import toast from 'react-hot-toast';
 import { electionsApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import type { Election } from '@/types';
+import CountdownDisplay from '@/components/CountdownDisplay';
 
 export default function Elections() {
     const { currentOrganization, currentOrganizationRole } = useAuthStore();
@@ -112,6 +113,12 @@ export default function Elections() {
                     color: 'bg-amber-100 text-amber-700 border-amber-200',
                     icon: <Clock className="w-4 h-4" />,
                     label: 'Draft',
+                };
+            case 'SCHEDULED':
+                return {
+                    color: 'bg-purple-100 text-purple-700 border-purple-200',
+                    icon: <Calendar className="w-4 h-4" />,
+                    label: 'Scheduled',
                 };
             case 'CLOSED':
                 return {
@@ -210,6 +217,7 @@ export default function Elections() {
                         >
                             <option value="ALL">All Statuses</option>
                             <option value="DRAFT">Draft</option>
+                            <option value="SCHEDULED">Scheduled</option>
                             <option value="OPEN">Open</option>
                             <option value="CLOSED">Closed</option>
                         </select>
@@ -264,6 +272,15 @@ export default function Elections() {
                                                     <span>Ends {new Date(election.end_datetime).toLocaleDateString()}</span>
                                                 </span>
                                             )}
+                                        </div>
+                                        
+                                        {/* Countdown Timer */}
+                                        <div className="mt-3">
+                                            <CountdownDisplay 
+                                                status={election.status}
+                                                startDatetime={election.start_datetime}
+                                                endDatetime={election.end_datetime}
+                                            />
                                         </div>
                                     </div>
 

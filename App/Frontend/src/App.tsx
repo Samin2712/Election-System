@@ -14,7 +14,7 @@ import Results from './pages/Results';
 import ResultsDashboard from './pages/ResultsDashboard';
 import UserProfile from './pages/UserProfile';
 
-// Layout
+// Layout 
 import Layout from './components/Layout';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
